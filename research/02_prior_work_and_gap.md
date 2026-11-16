@@ -1,0 +1,55 @@
+# Prior work, known limitations, and candidate gap
+
+## Findings from the literature
+
+| Area | What the literature establishes | Design implication for KANM |
+|---|---|---|
+| Network topology and collective accuracy | Hahn, Hansen, and Olsson find that connectivity and clustering can impair truth-tracking in their [Laputa simulations](https://doi.org/10.1007/s11229-018-01936-6) and parameter ranges. This is a conditional result, not a law that communication is harmful. | Always report the population, topology, parameter distributions, time horizon, and outcomes; include both accuracy and time-to-resolution. |
+| Communication discipline | Angere and Olsson's [“Publish Late, Publish Rarely!”](https://doi.org/10.1093/oso/9780190680534.003.0002) studies conditions where high-confidence reporting and avoiding unsupported recycling can change the effect of network density. Thus repetition is already recognized in prior Laputa-related work. | Do not present a “no repeated evidence” rule as a new contribution. Represent evidence identity/provenance explicitly and test when deduplication helps or hurts. |
+| Shared information and testimony dependence | Bayesian social-learning work explicitly models dependency ([Whalen et al.](https://doi.org/10.1111/cogs.12485)); later multi-player experiments ([Fränken et al.](https://doi.org/10.1016/j.cognition.2023.105633)) find many human judgments are better described by a computationally cheaper, dependency-insensitive account in the tested tasks. Laputa's independence assumption is a known modeling boundary, not an untouched field-wide problem, and normative correction should not be presumed behaviorally realistic. | Compare normative dependency-aware inference and behaviorally plausible naïve aggregation as separate mechanisms. A provenance extension's novelty would need to be limited to a precise integration with Laputa's dynamic trust and inquiry mechanisms. |
+| Exactness of the Olsson update | [Merdes, von Sydow & Hahn (2021)](https://doi.org/10.1007/s11229-020-02595-2) show that the Olsson model ignores the correlation between hypothesis and reliability that a report creates, call its agents naïve Bayesian, and note the resulting order effects (also [Hahn et al. 2018](https://doi.org/10.1111/tops.12374)). They argue that avoiding order effects requires remembering all past reports. | Do not claim the diagnosis. KANM stores finite-grid conditional trust marginals rather than an unbounded report history; this is a **candidate implementation property**, not yet a verified novel contribution, and needs matched comparisons against streaming Bayesian methods ([11](11_deep_research_and_v0.5_validation.md)). |
+| Online Bayesian crowd aggregation | Streaming Bayesian Inference for Crowdsourced Classification (Manino, Tran-Thanh & Jennings, 2019) proposes a low-complexity online Bayesian crowd algorithm and states asymptotic guarantees. Zhu, Xu & Yan (2015) give online Dawid–Skene with a convergence result to a stationary point. | “Online,” “Bayesian,” and streaming reliability learning are not KANM contributions. Compare methods, objectives, assumptions, guarantees, and memory directly. KANM's exact item posterior plus cross-item assumed-density filter is a distinct design to evaluate, not an established state-of-the-art result. |
+| Probability calibration of crowdsourced aggregation | A recent October 2026 arXiv preprint studies calibration across 39 human crowdsourcing datasets and LLM crowds. It reports miscalibration in Majority Vote, Dawid–Skene and other aggregators; it proves calibration for a Bayesian aggregator under its own data-generating model. | Probability quality must be a primary endpoint alongside accuracy. A posterior can be calibrated when its generative assumptions hold and still fail on asymmetric, dependent or shifted data. Report proper scores, positive-probability calibration and confidence ECE; do not fit a post-hoc calibrator on evaluation items. |
+| Epistemic vigilance | [Reisinger, Kogler, and Jäger](https://doi.org/10.18564/jasss.5136) formalize plausibility checking, criticism, and competence checking in an agent-based model. Their discussion points to domain-specific competence and changing trust as further questions. | Treat vigilance as an optional comparison/model module, not a new mechanism invented here. Separate message content evaluation from source reliability. |
+| Inquiry agendas and subquestions | [Habgood-Coote's group inquiry account](https://doi.org/10.1007/s10670-020-00232-5) explains how complex questions can be split into subquestions and assigned across time or participants. Bayesian experimental design also distinguishes expected entropy reduction from decision-oriented utility; [Lindley](https://doi.org/10.1214/aoms/1177728069) and [Bernardo](https://doi.org/10.1214/aos/1176344689) provide foundational treatments. | A seeker-helper extension should preserve the parent question and task allocation history. Compare expected information gain with goal-level value of information; neither is a universal research objective. |
+| Epistemic injustice | [Dyck's bandit-network simulation](https://doi.org/10.1017/epi.2024.44), after Zollman (2007), already models credibility excess and its effects on epistemic success. | If modeled, represent perceived credibility, actual reliability, domain competence, identity cues, and power separately; avoid assigning group-level ability as an inherent trait. Treat normative interpretation as a separate argument. |
+| Multi-topic misinformation and group belief | Recent models represent content categories, background beliefs, competence by domain, and network structure. A 2024 PLOS ONE paper also reimplements a simplified Olsson-style model in NetLogo. | A multi-question/multi-domain successor should be compared against these approaches and avoid claiming that Laputa was the first network model of trust or misinformation. |
+| Question generation by LLM agents | A September 2026 preprint studies question formation in multi-agent inquiry and reports convergence toward question forms and text framings. It is adjacent, emerging evidence, not a peer-reviewed validation of a Laputa extension. | For an AI-assisted research use case, test agenda narrowing and provenance/selection effects; label model-based agents distinctly from human agents. |
+| ABM reporting and validation | The [ODD update](https://doi.org/10.18564/jasss.4259), [2024 validation overview](https://doi.org/10.18564/jasss.5258), and [context-relative adequacy protocol](https://doi.org/10.1016/j.envsoft.2022.105559) recommend explicit model description and multiple validation-supporting methods. No single validation method fits all models. | Use a full design description, executable configs, deterministic seeds, statistical uncertainty, docking/replication, sensitivity analyses, and purpose-specific external validation. |
+
+## What is not “unsolved” in the broad sense
+
+- Repeated or dependent information has a substantial Bayesian and social-learning literature.
+- Normative dependence-aware inference does not guarantee a good descriptive model of actual people; human group experiments report systematic use of naïve aggregation in their tested settings.
+- Expected information gain is a defensible criterion when reducing uncertainty is itself the aim; when actions have consequences, expected value of sample information tied to the decision utility is a stronger comparator. Cost weights must be stated in interpretable units.
+- Question decomposition and distributed group inquiry have philosophical and computational antecedents.
+- Trust, competence, credibility bias, and epistemic vigilance are modeled in neighboring frameworks.
+- A NetLogo reimplementation of a simplified Olsson-style social-learning model is reported in 2024; this does not establish a maintained full port of Laputa.
+- Network structure and scientific communication were already explored in multiple Laputa applications.
+
+## Candidate contribution
+
+**Synthesis (provisional):** A defensible contribution is not “adding trust,” “asking questions,” “marking limits,” or “preventing misinformation” in isolation. The stronger candidate is a reproducible, modular framework that connects:
+
+1. Laputa-style dynamic belief and source-trust updating;
+2. provenance-aware handling of evidence that may be shared, repeated, or correlated;
+3. explicit question/subquestion structures and cost-aware assignment to seekers/helpers;
+4. structured scope/limitation metadata on evidence and answers; and
+5. evaluation of truth-tracking, calibration, inquiry cost, resolution, and distribution of benefits.
+
+A narrower candidate is now available. Under a finite reliability grid and Laputa's own assumptions, KANM's exact-joint state is order invariant and does not store an unbounded report history; swapping it for the factorised rule changes collective outcomes in an exploratory study ([09](09_factorization_study_results.md)). Streaming Bayesian and online Dawid–Skene methods are prior art, and the matched method comparison is missing. The non-exactness of Laputa's update itself is also prior art.
+
+The combined integration may be underexplored, but that is **not yet a verified novelty claim**. Before any paper or public release makes a novelty claim, a systematic search should cover social epistemology, Bayesian testimony, information cascades, epistemic vigilance, group inquiry, active information acquisition, multi-agent AI research, and provenance-aware evidence aggregation. Model adequacy is relative to a specific research context; a methodologically strong validation protocol therefore asks which evidence supports each intended inference instead of treating a checklist as universal proof.
+
+## Main candidate research question
+
+Under what conditions do provenance-aware, scope-aware, question-directed extensions improve the calibration and truth-tracking of collaborative inquiry over a Laputa baseline, and what costs or distributional harms do they introduce?
+
+## Falsifiable expectations to test (not findings)
+
+- **H1, dependency:** Tracking shared evidence should reduce overconfident belief shifts when multiple reports descend from the same evidence, while potentially slowing convergence when the provenance graph is wrong or incomplete.
+- **H2, inquiry selection:** Selecting subquestions by expected value of information under an explicit budget may improve task performance per unit cost, but can miss useful exploratory questions if the utility function is narrow.
+- **H3, scope markers:** Correct scope metadata should reduce inappropriate transfer of evidence to mismatched questions; noisy or strategic metadata may instead harm calibration.
+- **H4, distribution:** Centrality, competence cues, and assignment policies can distribute epistemic gains unevenly even when the group mean improves.
+
+Each expectation has plausible counterexamples. The study must report null and adverse outcomes, not only support for these expectations.

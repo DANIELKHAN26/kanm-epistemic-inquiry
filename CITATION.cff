@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: >-
+  If you use KANM in research, please cite the software and the historical
+  Laputa work listed in research/references.md.
+title: "KANM: Question-Directed Collaborative Inquiry"
+authors:
+  - family-names: Khan
+    given-names: Daniel
+version: 0.5.0
+date-released: 2026-11-16
+license: GPL-3.0-only
+keywords:
+  - agent-based modeling
+  - Bayesian inference
+  - social epistemology
+  - collaborative inquiry
+  - evidence provenance
+  - source reliability
+  - value of information
