@@ -1,5 +1,7 @@
 # KANM: Question-Directed Collaborative Inquiry
 
+**Source repository:** [github.com/DANIELKHAN26/kanm-epistemic-inquiry](https://github.com/DANIELKHAN26/kanm-epistemic-inquiry)
+
 KANM is research software for studying how people or artificial agents divide inquiry, assess testimony, and update beliefs in networks. It reimplements the Bayesian network model behind the historical Laputa simulator (Olsson and Angere) and adds:
 - an exact Bayesian reference rule;
 - provenance-aware dependence inference;

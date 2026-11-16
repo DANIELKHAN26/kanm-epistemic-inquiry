@@ -55,7 +55,7 @@ The code has 158 unit and invariant tests. The public crowd benchmark is a limit
 
 ## Attribution
 
-KANM is a new implementation based on published equations and descriptions; no historical Laputa source code is included. We acknowledge Erik J. Olsson and Staffan Angere. Relevant citations are listed in the [reference register](research/references.md); see the [SourceForge record](https://sourceforge.net/projects/epistemenet/) and [Olsson's 2013 model exposition](https://lucris.lub.lu.se/ws/portalfiles/portal/5684445/7758617.pdf).
+KANM is a new implementation based on published equations and descriptions; no historical Laputa source code is included. Source code is hosted at [GitHub](https://github.com/DANIELKHAN26/kanm-epistemic-inquiry). We acknowledge Erik J. Olsson and Staffan Angere. Relevant citations are listed in the [reference register](research/references.md); see the [SourceForge record](https://sourceforge.net/projects/epistemenet/) and [Olsson's 2013 model exposition](https://lucris.lub.lu.se/ws/portalfiles/portal/5684445/7758617.pdf).
 
 ## License
 
