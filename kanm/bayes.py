@@ -41,8 +41,10 @@ not silently lost.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import exp, inf, isfinite, isinf, lgamma, log, log1p
+from math import exp, inf, isfinite, isinf, lgamma, log, log1p, pi
 from typing import Hashable, Iterable
+
+from .trust import TrustState
 
 MAX_TRUST_POINTS = 100_001
 
@@ -50,9 +52,13 @@ MAX_TRUST_POINTS = 100_001
 def _probability(value: float, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be a finite probability in [0, 1]")
+    try:
+        value = float(value)
+    except OverflowError as error:
+        raise ValueError(f"{label} must be a finite probability in [0, 1]") from error
     if not isfinite(value) or not 0.0 <= value <= 1.0:
         raise ValueError(f"{label} must be a finite probability in [0, 1]")
-    return float(value)
+    return value
 
 
 def _points(points: int, minimum: int) -> int:
@@ -97,6 +103,8 @@ def _log_sigmoid(x: float) -> float:
 _CF_MAX_ITER = 200_000
 _CF_EPS = 1e-15
 _CF_TINY = 1e-300
+_MIN_BETA_SHAPE = 1e-12
+_MAX_BETA_SHAPE = 1e6
 
 
 def _beta_continued_fraction(a: float, b: float, x: float) -> float:
@@ -123,18 +131,155 @@ def _beta_continued_fraction(a: float, b: float, x: float) -> float:
     raise ValueError("incomplete beta continued fraction did not converge")
 
 
+def _stirling_correction(x: float) -> float:
+    """Remainder after the leading terms of Stirling's log-gamma formula."""
+    inverse = 1.0 / x
+    inverse_squared = inverse * inverse
+    return inverse * (
+        1.0 / 12.0
+        + inverse_squared
+        * (
+            -1.0 / 360.0
+            + inverse_squared
+            * (
+                1.0 / 1260.0
+                + inverse_squared * (-1.0 / 1680.0 + inverse_squared / 1188.0)
+            )
+        )
+    )
+
+
+def _log_beta(a: float, b: float) -> float:
+    """Compute ``log(Beta(a, b))`` without subtracting huge log-gammas.
+
+    Direct ``lgamma(a) + lgamma(b) - lgamma(a + b)`` loses precision when
+    one shape is large and can overflow even when the log-beta value is
+    representable. The mixed-shape branch evaluates the log-gamma difference
+    with ``log1p``; the large-shape branch uses a Stirling expansion.
+    """
+    total = a + b
+    if not isfinite(total):
+        raise ValueError("Beta shape parameters are too large for double-precision evaluation")
+    small, large = min(a, b), max(a, b)
+    if large < 100.0:
+        return lgamma(a) + lgamma(b) - lgamma(total)
+    if small >= 100.0:
+        return (
+            (a - 0.5) * log(a / total)
+            + (b - 0.5) * log(b / total)
+            - 0.5 * log(total)
+            + 0.5 * log(2.0 * pi)
+            + _stirling_correction(a)
+            + _stirling_correction(b)
+            - _stirling_correction(total)
+        )
+
+    ratio = small / large
+    log_gamma_ratio = (
+        small * log(large)
+        + (large + small - 0.5) * log1p(ratio)
+        - small
+        + _stirling_correction(total)
+        - _stirling_correction(large)
+    )
+    return lgamma(small) - log_gamma_ratio
+
+
+def _beta_tail(a: float, b: float, x: float, log_front: float) -> float:
+    """Evaluate one incomplete-beta tail from its continued fraction."""
+    fraction = _beta_continued_fraction(a, b, x)
+    if not isfinite(fraction) or fraction <= 0.0:
+        raise ValueError("incomplete beta continued fraction returned an invalid value")
+    log_tail = log_front + log(fraction) - log(a)
+    if not isfinite(log_tail):
+        if log_tail == -inf:
+            return 0.0
+        raise ValueError("incomplete beta tail is not representable")
+    if log_tail > 0.0:
+        if log_tail <= 1e-12:
+            return 1.0
+        raise ValueError("incomplete beta tail exceeds one; numerical evaluation is unstable")
+    return exp(log_tail)
+
+
 def _beta_cdf_pair(a: float, b: float, x: float) -> tuple[float, float]:
-    """Return ``(I_x(a, b), 1 - I_x(a, b))``, each computed from its small side."""
-    if x <= 0.0:
+    """Return ``(I_x(a, b), 1 - I_x(a, b))`` from the numerically smaller side.
+
+    Interior CDF evaluation is supported for each shape in
+    ``[_MIN_BETA_SHAPE, _MAX_BETA_SHAPE]``. Exact endpoints and the symmetric
+    midpoint are returned directly for any finite positive shapes.
+    """
+    converted = []
+    for value in (a, b, x):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("Beta shapes and x must be finite real numbers")
+        try:
+            value = float(value)
+        except OverflowError as error:
+            raise ValueError("Beta shapes and x must be finite real numbers") from error
+        if not isfinite(value):
+            raise ValueError("Beta shapes and x must be finite real numbers")
+        converted.append(value)
+    a, b, x = converted
+    if a <= 0.0 or b <= 0.0:
+        raise ValueError("Beta shape parameters must be > 0")
+    if not 0.0 <= x <= 1.0:
+        raise ValueError("x must lie in [0, 1]")
+    if x == 0.0:
         return 0.0, 1.0
-    if x >= 1.0:
+    if x == 1.0:
         return 1.0, 0.0
-    log_front = lgamma(a + b) - lgamma(a) - lgamma(b) + a * log(x) + b * log1p(-x)
-    if x < (a + 1.0) / (a + b + 2.0):
-        lower = exp(log_front) * _beta_continued_fraction(a, b, x) / a
-        return lower, 1.0 - lower
-    upper = exp(log_front) * _beta_continued_fraction(b, a, 1.0 - x) / b
-    return 1.0 - upper, upper
+    if a == b and x == 0.5:
+        return 0.5, 0.5
+    if min(a, b) < _MIN_BETA_SHAPE or max(a, b) > _MAX_BETA_SHAPE:
+        raise ValueError(
+            "interior incomplete beta evaluation supports shape parameters "
+            f"in [{_MIN_BETA_SHAPE:g}, {_MAX_BETA_SHAPE:g}]"
+        )
+
+    total = a + b
+    if not isfinite(total):
+        raise ValueError("Beta shape parameters are too large for double-precision evaluation")
+    log_front = -_log_beta(a, b) + a * log(x) + b * log1p(-x)
+    lower_side = x < (a + 1.0) / (total + 2.0)
+    first = (a, b, x) if lower_side else (b, a, 1.0 - x)
+    try:
+        tail = _beta_tail(*first, log_front)
+        if tail > 1.0 - 1e-8:
+            # Near-one tails lose relative precision when represented as
+            # 1 - epsilon. Try evaluating epsilon directly, while retaining
+            # the standard branch if its complement is not computable.
+            second = (b, a, 1.0 - x) if lower_side else (a, b, x)
+            try:
+                alternate = _beta_tail(*second, log_front)
+            except ValueError:
+                alternate = None
+            if alternate is not None and alternate <= 0.5:
+                return _tail_pair(alternate, lower_tail=not lower_side)
+    except ValueError as first_error:
+        second = (b, a, 1.0 - x) if lower_side else (a, b, x)
+        try:
+            alternate = _beta_tail(*second, log_front)
+        except ValueError as second_error:
+            raise ValueError(
+                f"incomplete beta evaluation failed for shapes ({a}, {b}) at x={x}"
+            ) from second_error
+        if alternate > 0.5:
+            raise ValueError(
+                f"incomplete beta evaluation failed for shapes ({a}, {b}) at x={x}"
+            ) from first_error
+        return _tail_pair(alternate, lower_tail=not lower_side)
+
+    return _tail_pair(tail, lower_tail=lower_side)
+
+
+def _tail_pair(tail: float, *, lower_tail: bool) -> tuple[float, float]:
+    """Return ``(lower, upper)`` keeping the directly evaluated tail unrounded.
+
+    Writing the evaluated tail as ``1 - (1 - tail)`` would flush any tail below
+    about 1e-16 to zero, and a zero cell mass is an impossible reliability.
+    """
+    return (tail, 1.0 - tail) if lower_tail else (1.0 - tail, tail)
 
 
 def _beta_cell_masses(a: float, b: float, cells: int) -> list[float]:
@@ -148,6 +293,10 @@ def _beta_cell_masses(a: float, b: float, cells: int) -> list[float]:
             mass = pairs[k + 1][0] - pairs[k][0]
         else:
             mass = pairs[k][1] - pairs[k + 1][1]
+        if mass < -1e-12:
+            raise ValueError(
+                "incomplete beta CDFs are not monotone at the requested grid resolution"
+            )
         masses.append(max(0.0, mass))
     return masses
 
@@ -248,9 +397,11 @@ class TrustDistribution:
         Cell ``k`` receives its exact Beta probability, placed at the exact
         conditional mean of the density within the cell. The discrete
         distribution therefore has exactly the requested mean (up to
-        floating-point error) for any concentration, including the U- and
+        floating-point error) within the supported shape range, including the U- and
         J-shaped densities that arise when ``mean * c < 1`` or
-        ``(1 - mean) * c < 1``.
+        ``(1 - mean) * c < 1``. Interior CDF evaluation requires both shapes,
+        including ``alpha + 1`` for the first moment, to lie in
+        ``[1e-12, 1e6]``; unsupported implied shapes raise ``ValueError``.
         """
         mean = _probability(mean, "mean")
         if mean in (0.0, 1.0):
@@ -258,16 +409,25 @@ class TrustDistribution:
                 "mean must lie strictly between 0 and 1; certain reliability makes "
                 "contrary reports impossible (use a high concentration instead)"
             )
-        if (
-            isinstance(concentration, bool)
-            or not isinstance(concentration, (int, float))
-            or not isfinite(concentration)
-            or concentration <= 0.0
-        ):
+        if isinstance(concentration, bool) or not isinstance(concentration, (int, float)):
+            raise ValueError("concentration must be finite and > 0")
+        try:
+            concentration = float(concentration)
+        except OverflowError as error:
+            raise ValueError("concentration must be finite and > 0") from error
+        if not isfinite(concentration) or concentration <= 0.0:
             raise ValueError("concentration must be finite and > 0")
         points = _points(points, 2)
         alpha = mean * concentration
         beta = (1.0 - mean) * concentration
+        if (
+            min(alpha, beta) < _MIN_BETA_SHAPE
+            or max(alpha + 1.0, beta) > _MAX_BETA_SHAPE
+        ):
+            raise ValueError(
+                "mean and concentration imply Beta shapes outside the supported "
+                f"range [{_MIN_BETA_SHAPE:g}, {_MAX_BETA_SHAPE:g}]"
+            )
         masses = _beta_cell_masses(alpha, beta, points)
         # Int_cell x f(x; a, b) dx = mean * P_cell(Beta(a + 1, b)).
         first_moments = _beta_cell_masses(alpha + 1.0, beta, points)
@@ -339,7 +499,7 @@ class TrustDistribution:
         return self._reweighted(log_likelihood)
 
 
-def log_likelihood_ratio(trust: TrustDistribution, positive: bool) -> float:
+def log_likelihood_ratio(trust: TrustState, positive: bool) -> float:
     """Log-likelihood ratio of a report under the Laputa rule.
 
     Equal to ``log(mu / (1 - mu))`` for a positive report and its negative for
@@ -359,7 +519,7 @@ def log_likelihood_ratio(trust: TrustDistribution, positive: bool) -> float:
     return ratio if positive else -ratio
 
 
-def update_belief(prior_belief: float, trust: TrustDistribution, positive: bool) -> float:
+def update_belief(prior_belief: float, trust: TrustState, positive: bool) -> float:
     """Update credence in p after one positive/negative report from a source."""
     q = _probability(prior_belief, "prior_belief")
     mu = trust.expected_reliability
@@ -375,7 +535,7 @@ def update_belief(prior_belief: float, trust: TrustDistribution, positive: bool)
     return numerator / denominator
 
 
-def update_log_odds(log_odds: float, trust: TrustDistribution, positive: bool) -> float:
+def update_log_odds(log_odds: float, trust: TrustState, positive: bool) -> float:
     """Log-odds form of :func:`update_belief` (algebraically identical).
 
     Raises ``ValueError`` when the report is impossible under the model, for

@@ -2,6 +2,7 @@ from itertools import product
 import math
 import random
 import unittest
+import warnings
 
 from kanm.dependence import (
     ProvenanceNetwork,
@@ -62,6 +63,41 @@ class DependenceTests(unittest.TestCase):
         net.add(relay("r", "study", 0.5))
         self.assertAlmostEqual(net.posterior(0.37, {"r": True}), 0.37)
 
+    def test_predictive_distribution_conditions_on_parent(self):
+        net = ProvenanceNetwork()
+        net.add(symmetric_primary("study", 0.8))
+        net.add(relay("summary", "study", 0.9))
+        self.assertAlmostEqual(
+            net.predictive_distribution("summary", 0.5, {"study": True})[True], 0.9
+        )
+        self.assertAlmostEqual(
+            net.predictive_distribution("summary", 0.5, {"study": False})[True], 0.1
+        )
+
+    def test_predictive_distribution_supports_prior_endpoints(self):
+        net = ProvenanceNetwork()
+        net.add(symmetric_primary("study", 0.8))
+        self.assertEqual(
+            net.predictive_distribution("study", 1.0, {})[True], 0.8
+        )
+        self.assertAlmostEqual(
+            net.predictive_distribution("study", 0.0, {})[True], 0.2
+        )
+
+    def test_predictive_distribution_is_degenerate_for_observed_node(self):
+        net = ProvenanceNetwork()
+        net.add(symmetric_primary("study", 0.8))
+        self.assertEqual(
+            net.predictive_distribution("study", 0.5, {"study": False}),
+            {False: 1.0, True: 0.0},
+        )
+
+    def test_predictive_distribution_rejects_impossible_conditioning(self):
+        net = ProvenanceNetwork()
+        net.add(primary("certain", sensitivity=1.0, false_positive_rate=0.0))
+        with self.assertRaisesRegex(ValueError, "zero probability"):
+            net.predictive_distribution("certain", 1.0, {"certain": False})
+
     def test_partial_dependence_hand_computed(self):
         net = ProvenanceNetwork()
         net.add(symmetric_primary("s", 0.8))
@@ -97,6 +133,24 @@ class DependenceTests(unittest.TestCase):
         net = ProvenanceNetwork()
         with self.assertRaisesRegex(ValueError, "added first"):
             net.add(relay("r", "missing", 0.9))
+
+    def test_exact_inference_warns_before_latent_enumeration_gets_expensive(self):
+        net = ProvenanceNetwork()
+        net.add(symmetric_primary("n0", 0.8))
+        for index in range(1, 17):
+            net.add(relay(f"n{index}", f"n{index - 1}", 0.9))
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            net.posterior(0.5, {"n16": True})
+        self.assertTrue(any("2^16 latent assignments" in str(w.message) for w in caught))
+
+    def test_exact_inference_stops_at_latent_cap(self):
+        net = ProvenanceNetwork()
+        net.add(symmetric_primary("n0", 0.8))
+        for index in range(1, 22):
+            net.add(relay(f"n{index}", f"n{index - 1}", 0.9))
+        with self.assertRaisesRegex(ValueError, "exact-enumeration limit 20"):
+            net.posterior(0.5, {"n21": True})
 
     def test_from_ledger_with_latent_primary(self):
         ledger = EvidenceLedger()

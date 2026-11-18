@@ -1,13 +1,13 @@
 cff-version: 1.2.0
 message: >-
-  If you use KANM in research, please cite the software and the historical
-  Laputa work listed in research/references.md.
+  If you use KANM, please cite it as below. If you use the Laputa-style
+  updates, please also cite Olsson (2011) and Vallinder & Olsson (2014).
 title: "KANM: Question-Directed Collaborative Inquiry"
 authors:
   - family-names: Khan
     given-names: Daniel
-version: 0.5.0
-date-released: 2026-11-16
+version: 0.10.0
+date-released: 2026-11-18
 license: GPL-3.0-only
 repository-code: "https://github.com/DANIELKHAN26/kanm-epistemic-inquiry"
 keywords:

@@ -195,17 +195,21 @@ def near_cut(scenario: dict[str, Any], states: list[list[float]]) -> bool:
 
 
 def deterministic(harness: str, scenarios: int, steps: int, seed: int,
-                  emulate_float32: bool = False) -> int:
+                  emulate_float32: bool = False, records: str | None = None) -> int:
     rng = random.Random(seed)
     passed = failed = indeterminate = 0
     worst_belief = worst_trust = 0.0
     failures = []
+    rows = []
     for index in range(scenarios):
         scenario = random_scenario(rng, deterministic=True)
         laputa = run_harness(harness, scenario, steps, seed=index)
         kanm = kanm_trajectory(scenario, steps)
         if near_cut(scenario, [s["beliefs"] for s in laputa] + [s["beliefs"] for s in kanm]):
             indeterminate += 1
+            rows.append({"scenario": index, "policy": scenario["policy"],
+                         "inquirers": len(scenario["inquirers"]), "links": len(scenario["links"]),
+                         "outcome": "indeterminate"})
             continue
         belief_diff = max(abs(a - b) for L, K in zip(laputa, kanm)
                           for a, b in zip(L["beliefs"], K["beliefs"]))
@@ -218,7 +222,12 @@ def deterministic(harness: str, scenarios: int, steps: int, seed: int,
         counts_equal = all(L["messages_delivered"] == K["messages"]
                            and L["inquiry_results"] == K["inquiries"] for L, K in zip(laputa, kanm))
         worst_belief, worst_trust = max(worst_belief, belief_diff), max(worst_trust, trust_diff)
-        if belief_diff <= TOLERANCE and trust_diff <= TOLERANCE and counts_equal:
+        ok = belief_diff <= TOLERANCE and trust_diff <= TOLERANCE and counts_equal
+        rows.append({"scenario": index, "policy": scenario["policy"],
+                     "inquirers": len(scenario["inquirers"]), "links": len(scenario["links"]),
+                     "outcome": "passed" if ok else "failed", "max_belief_diff": belief_diff,
+                     "max_trust_diff": trust_diff, "counts_equal": counts_equal})
+        if ok:
             passed += 1
         else:
             failed += 1
@@ -230,6 +239,12 @@ def deterministic(harness: str, scenarios: int, steps: int, seed: int,
               "passed": passed, "failed": failed, "indeterminate": indeterminate,
               "max_belief_diff": worst_belief, "max_trust_diff": worst_trust,
               "tolerance": TOLERANCE, "failures": failures[:20]}
+    if records:
+        report["records"] = records
+        with open(records, "w", encoding="utf-8") as handle:
+            json.dump({key: value for key, value in report.items() if key != "records"}
+                      | {"rows": rows}, handle, indent=1, allow_nan=False)
+            handle.write("\n")
     print(json.dumps(report, indent=2))
     return 0 if failed == 0 and passed > 0 else 1
 
@@ -272,6 +287,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--stochastic", action="store_true")
     parser.add_argument("--runs", type=int, default=400)
+    parser.add_argument("--records", metavar="PATH",
+                        help="deterministic mode: also write per-scenario results as JSON")
     parser.add_argument("--emulate-float32", action="store_true",
                         help="post hoc diagnostic: KANM uses Laputa's single-precision trust arithmetic "
                              "(requires numpy)")
@@ -287,7 +304,7 @@ def main(argv: list[str] | None = None) -> int:
             return stochastic(args.harness, args.runs, args.steps, args.seed,
                               emulate_float32=args.emulate_float32)
         return deterministic(args.harness, args.scenarios, args.steps, args.seed,
-                             emulate_float32=args.emulate_float32)
+                             emulate_float32=args.emulate_float32, records=args.records)
 
 
 if __name__ == "__main__":

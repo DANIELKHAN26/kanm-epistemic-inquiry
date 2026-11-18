@@ -1,7 +1,7 @@
 """Regression tests for the second independent review (defects D16-D24).
 
 Each test reproduces a defect that existed in the v0.3.0 draft; see
-research/08_v0.3_audit_and_extensions.md, section 1.
+research/08_audit_and_extensions.md, section 1.
 """
 
 import math

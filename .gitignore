@@ -6,6 +6,8 @@ build/
 dist/
 /data/
 /datasets/
+/kan/
+/.aws/
 /docking/laputa_1_6/build/
 /docking/laputa_1_6/build-*/
 .coverage

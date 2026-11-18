@@ -19,6 +19,7 @@ from kanm.reliability import (
     run_benchmark,
     score,
     synthetic_one_coin,
+    _map_binomial_rate,
 )
 
 PRIOR = TrustDistribution.beta_prior(2 / 3, 3.0, 41)
@@ -88,6 +89,17 @@ class MethodTests(unittest.TestCase):
             score(Estimate("x", {"a": 0.5}, {}), {"a": 1}, bins=0)
         with self.assertRaisesRegex(ValueError, "finite"):
             score(Estimate("x", {"a": float("nan")}, {}), {"a": 1})
+
+    def test_dawid_skene_uniform_prior_keeps_boundary_rates_finite(self):
+        # With Beta(1, 1), a worker who has no effective successes or failures
+        # has a boundary MAP. The E-step must never take log(0).
+        self.assertEqual(_map_binomial_rate(0.0, 3.0, 1.0, 1.0), 1e-12)
+        self.assertEqual(_map_binomial_rate(3.0, 3.0, 1.0, 1.0), 1.0 - 1e-12)
+        data = CrowdData("boundary", (("positive", "w", 1), ("negative", "w", 0)))
+        for model in ("one_coin", "two_coin"):
+            estimate = dawid_skene(data, model=model, alpha=1.0, beta=1.0)
+            self.assertTrue(all(math.isfinite(p) for p in estimate.posteriors.values()))
+            self.assertTrue(all(math.isfinite(r) for r in estimate.reliability.values()))
 
     def test_laputa_simultaneous_cannot_learn_and_equals_majority_vote(self):
         data, _ = synthetic_one_coin(300, 30, 4, seed=2)  # even count: exact ties occur

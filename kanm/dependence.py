@@ -14,13 +14,15 @@ likelihood ratio as if the reports were conditionally independent given ``H``.
 That comparator isolates the error due to ignoring dependence alone, because
 each report's individual diagnosticity is computed correctly.
 
-Exact enumeration is exponential in the number of latent ancestors and is
-limited to :data:`MAX_LATENT` nodes. It is intended for verification and for
-small case studies, and as ground truth for approximations.
+Exact enumeration is exponential in the number of latent ancestors. It warns
+above :data:`WARN_LATENT` nodes and is limited to :data:`MAX_LATENT` nodes. It
+is intended for verification and for small case studies, and as ground truth
+for approximations.
 """
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from itertools import product
 from math import exp, inf, isfinite, log
@@ -30,6 +32,7 @@ from typing import Mapping, Sequence
 from .bayes import _probability, expit, logit
 
 MAX_LATENT = 20
+WARN_LATENT = 15
 
 CPD = Mapping[tuple[bool, tuple[bool, ...]], float]
 
@@ -182,6 +185,13 @@ class ProvenanceNetwork:
             raise ValueError(
                 f"{len(latent)} latent ancestors exceeds exact-enumeration limit {MAX_LATENT}"
             )
+        if len(latent) > WARN_LATENT:
+            warnings.warn(
+                f"exact inference will enumerate 2^{len(latent)} latent assignments; "
+                "runtime grows exponentially",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         order = [n for n in self.nodes if n in relevant]  # insertion order is topological
         results = []
         for truth in (True, False):
@@ -208,6 +218,51 @@ class ProvenanceNetwork:
         log_true, log_false = self._log_evidence({node_id: True})
         return (exp(log_true) if log_true > -inf else 0.0,
                 exp(log_false) if log_false > -inf else 0.0)
+
+    def predictive_distribution(
+        self,
+        node_id: str,
+        prior: float,
+        observations: Mapping[str, bool],
+    ) -> dict[bool, float]:
+        """Return ``P(node_id | observations)`` as ``{False: p0, True: p1}``.
+
+        The probabilities integrate over the binary truth and every latent
+        report ancestor. This is the exact one-step predictive distribution
+        needed by a query planner that acquires evidence from this network.
+        If the requested report is already observed, the result is degenerate.
+        Probabilities at prior endpoints (0 or 1) are supported.
+        """
+        if node_id not in self.nodes:
+            raise ValueError(f"unknown node: {node_id}")
+        prior = _probability(prior, "prior")
+        observations = self._check_observations(observations)
+        log_base = self._log_prior_predictive(prior, observations)
+        if log_base == -inf:
+            raise ValueError("observations have zero probability under the prior model")
+        if node_id in observations:
+            value = observations[node_id]
+            return {False: float(not value), True: float(value)}
+        result: dict[bool, float] = {}
+        for value in (False, True):
+            augmented = dict(observations)
+            augmented[node_id] = value
+            log_joint = self._log_prior_predictive(prior, augmented)
+            result[value] = exp(log_joint - log_base) if log_joint > -inf else 0.0
+        total = result[False] + result[True]
+        if total <= 0.0:
+            raise ValueError("observations have zero probability under the prior model")
+        # The events partition the observation space; normalization removes
+        # only floating-point summation error from the two exact log sums.
+        return {value: probability / total for value, probability in result.items()}
+
+    def _log_prior_predictive(
+        self, prior: float, observations: Mapping[str, bool]
+    ) -> float:
+        log_true, log_false = self._log_evidence(observations)
+        weighted_true = log(prior) + log_true if prior > 0.0 else -inf
+        weighted_false = log(1.0 - prior) + log_false if prior < 1.0 else -inf
+        return _log_sum_exp([weighted_true, weighted_false])
 
     def log_likelihood_ratio(self, observations: Mapping[str, bool]) -> float:
         """Exact ``log P(obs | p) - log P(obs | not p)`` (the log-odds shift)."""
@@ -343,6 +398,8 @@ def _log_sum_exp(terms: list[float]) -> float:
     if not terms:
         return -inf
     peak = max(terms)
+    if peak == -inf:
+        return -inf
     return peak + log(sum(exp(t - peak) for t in terms))
 
 

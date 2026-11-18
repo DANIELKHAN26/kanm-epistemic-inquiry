@@ -99,6 +99,7 @@ from .bayes import (
     logit,
 )
 from .laputa16 import NODES as LAPUTA16_NODES, Laputa16Trust, validated_node_values
+from .trust import TrustState
 
 UPDATE_RULES = ("laputa", "exact_joint")
 SCHEDULES = ("simultaneous", "inquiry_then_messages", "laputa_1_6")
@@ -146,7 +147,7 @@ class _Agent:
     log_odds: float
     initial_belief: float
     rng: random.Random
-    inquiry_trust: TrustDistribution | Laputa16Trust | None = None
+    inquiry_trust: TrustState | None = None
     joint: ExactJointState | None = None
     received_evidence: int = 0
     inquired_this_round: bool = False
@@ -168,7 +169,7 @@ class _Agent:
 class _Edge:
     spec: EdgeSpec
     rng: random.Random
-    trust: TrustDistribution | Laputa16Trust | None = None
+    trust: TrustState | None = None
     # Laputa 1.6 schedule state (Link::lastUsed, Link::message).
     last_used_step: int = -1
     message: bool | None = None
@@ -479,7 +480,7 @@ class Simulation:
 
     def _trust_prior(
         self, mean: float, concentration: float, values: Any, label: str
-    ) -> TrustDistribution | Laputa16Trust:
+    ) -> TrustState:
         if self.trust_model == "laputa_1_6":
             if values is not None:
                 return validated_node_values(values, label)
@@ -489,7 +490,7 @@ class Simulation:
         return TrustDistribution.beta_prior(mean, concentration, self.trust_points)
 
     # ------------------------------------------------------------------ trust
-    def _trust(self, agent: _Agent, key: tuple) -> TrustDistribution:
+    def _trust(self, agent: _Agent, key: tuple) -> TrustState:
         if agent.joint is not None:
             return agent.joint.trust(key)
         if key == _INQUIRY:
