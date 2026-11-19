@@ -59,18 +59,24 @@ class EvidenceLedger:
     """Append-only evidence DAG and per-recipient first-seen tracking."""
 
     def __init__(self) -> None:
-        self.items: dict[str, EvidenceItem] = {}
+        self._items: dict[str, EvidenceItem] = {}
+        self._items_view = MappingProxyType(self._items)
         self._seen_by_recipient: dict[str, set[str]] = {}
+
+    @property
+    def items(self) -> Mapping[str, EvidenceItem]:
+        """Read-only view; use :meth:`add` to preserve DAG validation."""
+        return self._items_view
 
     def add(self, item: EvidenceItem) -> None:
         if not isinstance(item, EvidenceItem):
             raise TypeError("item must be an EvidenceItem")
-        if item.evidence_id in self.items:
+        if item.evidence_id in self._items:
             raise ValueError(f"duplicate evidence ID: {item.evidence_id}")
         for parent in item.parents:
-            if parent not in self.items:
+            if parent not in self._items:
                 raise ValueError(f"parent evidence must be added first: {parent}")
-        self.items[item.evidence_id] = item
+        self._items[item.evidence_id] = item
 
     def receive(self, recipient_id: str, evidence_id: str) -> bool:
         """Record exposure; return True only for a recipient's first exposure."""

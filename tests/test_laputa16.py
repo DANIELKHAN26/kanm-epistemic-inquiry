@@ -107,6 +107,20 @@ class TrustFunctionTests(unittest.TestCase):
             validated_node_values([2.0] * NODES, "x")
         self.assertAlmostEqual(validated_node_values([1.0] * NODES, "x").mass, 1.0)
 
+    def test_supplied_density_is_normalized_before_probability_updates(self):
+        # A curve can pass the historical 5% mass tolerance while its raw
+        # integral of r*f(r) exceeds one. Treat that scale error as numerical,
+        # otherwise the report likelihood is not a probability.
+        values = [0.0] * NODES
+        values[-1] = 2.0 * RESOLUTION * 1.04
+        imported = validated_node_values(values, "custom")
+        self.assertAlmostEqual(imported.mass, 1.0, places=14)
+        self.assertLessEqual(imported.expected_reliability, 1.0)
+        self.assertGreaterEqual(imported.expected_unreliability, 0.0)
+        for positive in (True, False):
+            posterior = imported.observe(0.5, positive)
+            self.assertTrue(0.0 <= posterior.expected_reliability <= 1.0)
+
 
 def network(seed, n=5, density=0.5):
     rng = random.Random(seed)
@@ -144,7 +158,7 @@ class SimulationTrustModelTests(unittest.TestCase):
         result = Simulation([AgentSpec("a", 0.5, 1.0, 0.0, inquiry_trust_values=values)], [],
                             trust_model="laputa_1_6", steps=0).run()
         self.assertAlmostEqual(result.final_trust["a:inquiry"],
-                               Laputa16Trust(values).expected_reliability)
+                               validated_node_values(values, "test").expected_reliability)
         self.assertEqual(result.as_dict()["assumptions"]["trust_model"], "laputa_1_6")
 
 

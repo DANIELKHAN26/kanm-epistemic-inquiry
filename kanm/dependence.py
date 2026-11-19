@@ -25,7 +25,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 from itertools import product
-from math import exp, inf, isfinite, log
+from math import exp, fsum, inf, isfinite, log, log1p
 from types import MappingProxyType
 from typing import Mapping, Sequence
 
@@ -141,17 +141,28 @@ class ProvenanceNetwork:
     """Append-only DAG of report nodes with exact posterior inference."""
 
     def __init__(self) -> None:
-        self.nodes: dict[str, ReportNode] = {}
+        self._nodes: dict[str, ReportNode] = {}
+        self._nodes_view = MappingProxyType(self._nodes)
+
+    @property
+    def nodes(self) -> Mapping[str, ReportNode]:
+        """Read-only view; use :meth:`add` to preserve DAG validation."""
+        return self._nodes_view
+
+    @property
+    def node_ids(self) -> frozenset[str]:
+        """Report IDs in the network, independent of insertion order."""
+        return frozenset(self._nodes)
 
     def add(self, node: ReportNode) -> None:
         if not isinstance(node, ReportNode):
             raise TypeError("node must be a ReportNode")
-        if node.node_id in self.nodes:
+        if node.node_id in self._nodes:
             raise ValueError(f"duplicate node ID: {node.node_id}")
         for parent in node.parents:
-            if parent not in self.nodes:
+            if parent not in self._nodes:
                 raise ValueError(f"parent must be added first: {parent}")
-        self.nodes[node.node_id] = node
+        self._nodes[node.node_id] = node
 
     def ancestors(self, node_ids: Sequence[str]) -> set[str]:
         found: set[str] = set()
@@ -175,6 +186,10 @@ class ProvenanceNetwork:
                 raise ValueError(f"observation for {node_id} must be a boolean")
             checked[node_id] = value
         return checked
+
+    def validate_observations(self, observations: Mapping[str, bool]) -> dict[str, bool]:
+        """Validate and copy an observation mapping for this network."""
+        return self._check_observations(observations)
 
     def _log_evidence(self, observations: Mapping[str, bool]) -> tuple[float, float]:
         """Return ``(log P(obs | p), log P(obs | not p))`` exactly."""
@@ -218,6 +233,18 @@ class ProvenanceNetwork:
         log_true, log_false = self._log_evidence({node_id: True})
         return (exp(log_true) if log_true > -inf else 0.0,
                 exp(log_false) if log_false > -inf else 0.0)
+
+    def log_evidence(self, observations: Mapping[str, bool], truth: bool) -> float:
+        """Return ``log P(observations | truth)`` under this network.
+
+        ``-inf`` means the observations are impossible under the supplied
+        truth value and network. Keeping the likelihood in log space lets
+        model comparisons remain stable when many reports are combined.
+        """
+        if not isinstance(truth, bool):
+            raise ValueError("truth must be a boolean")
+        log_true, log_false = self._log_evidence(observations)
+        return log_true if truth else log_false
 
     def predictive_distribution(
         self,
@@ -274,10 +301,13 @@ class ProvenanceNetwork:
         observations = self._check_observations(observations)
         total = 0.0
         for node_id, value in observations.items():
-            p_true, p_false = self.marginal_likelihoods(node_id)
-            a = p_true if value else 1.0 - p_true
-            b = p_false if value else 1.0 - p_false
-            ratio = _log_ratio(log(a) if a > 0.0 else -inf, log(b) if b > 0.0 else -inf)
+            # Keep marginal probabilities in log space. Converting through
+            # marginal_likelihoods() first can underflow two tiny, nonzero
+            # likelihoods to 0 and lose their finite likelihood ratio.
+            ratio = _log_ratio(
+                self.log_evidence({node_id: value}, True),
+                self.log_evidence({node_id: value}, False),
+            )
             total = _combine(total, ratio)
         return total
 
@@ -294,6 +324,57 @@ class ProvenanceNetwork:
         """
         lo = logit(_probability(prior, "prior"))
         return expit(_combine(lo, self.independence_log_likelihood_ratio(observations)))
+
+    def independence_predictive_distribution(
+        self, node_id: str, prior: float, observations: Mapping[str, bool]
+    ) -> dict[bool, float]:
+        """Predict a report under the marginal conditional-independence comparator.
+
+        Observed reports update the truth belief using independent marginal
+        likelihoods. The target report is then generated from its exact
+        one-report marginal likelihood conditional on truth. All joint masses
+        remain in log space until the final two-outcome normalization.
+        """
+        if not isinstance(node_id, str) or node_id not in self.nodes:
+            raise ValueError(f"unknown node: {node_id}")
+        prior = _probability(prior, "prior")
+        checked = self._check_observations(observations)
+        base_true = log(prior) if prior > 0.0 else -inf
+        base_false = log1p(-prior) if prior < 1.0 else -inf
+        for observed_node, value in checked.items():
+            likelihood_true = self.log_evidence({observed_node: value}, True)
+            likelihood_false = self.log_evidence({observed_node: value}, False)
+            base_true = (
+                base_true + likelihood_true
+                if base_true > -inf and likelihood_true > -inf else -inf
+            )
+            base_false = (
+                base_false + likelihood_false
+                if base_false > -inf and likelihood_false > -inf else -inf
+            )
+        log_base = _log_sum_exp([base_true, base_false])
+        if log_base == -inf:
+            raise ValueError("observations have zero probability under the independence model")
+        if node_id in checked:
+            value = checked[node_id]
+            return {False: float(not value), True: float(value)}
+
+        log_masses = {}
+        for outcome in (False, True):
+            target_true = self.log_evidence({node_id: outcome}, True)
+            target_false = self.log_evidence({node_id: outcome}, False)
+            log_masses[outcome] = _log_sum_exp([
+                base_true + target_true if base_true > -inf and target_true > -inf else -inf,
+                base_false + target_false if base_false > -inf and target_false > -inf else -inf,
+            ])
+        probabilities = {
+            outcome: exp(mass - log_base) if mass > -inf else 0.0
+            for outcome, mass in log_masses.items()
+        }
+        total = probabilities[False] + probabilities[True]
+        if total <= 0.0:
+            raise ValueError("observations have zero probability under the independence model")
+        return {outcome: probability / total for outcome, probability in probabilities.items()}
 
     def dependence_report(self, prior: float, observations: Mapping[str, bool]) -> dict[str, float]:
         """Exact versus independence posterior and the overcounting in log-odds."""
@@ -400,7 +481,7 @@ def _log_sum_exp(terms: list[float]) -> float:
     peak = max(terms)
     if peak == -inf:
         return -inf
-    return peak + log(sum(exp(t - peak) for t in terms))
+    return peak + log(fsum(exp(t - peak) for t in terms))
 
 
 def _log_ratio(log_a: float, log_b: float) -> float:

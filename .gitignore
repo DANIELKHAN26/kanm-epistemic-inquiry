@@ -19,3 +19,8 @@ htmlcov/
 .env.*
 !.env.example
 *.log
+# Local studies and presentation assets; keep these out of the software repository.
+/research/
+/examples/
+/huggingface/
+/CHANGELOG.md

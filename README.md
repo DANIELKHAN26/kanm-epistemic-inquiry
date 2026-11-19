@@ -1,77 +1,112 @@
 # KANM
 
-If five people tell you the same thing, how much should you believe it? That depends on where they got it. Five people who each checked for themselves are strong evidence. Five people repeating one news story are worth about one story.
+KANM is a Python research library for comparing models of testimony, source reliability, shared evidence, and collaborative inquiry. It includes a network simulator in the Laputa tradition and exact inference tools for explicitly specified small models.
 
-KANM is a small Python library for working this out exactly. You describe who heard what from whom, and it tells you what the reports are actually worth. It also simulates groups of people who talk, trust each other more or less, and change their minds, building on the Laputa model of Erik Olsson and Staffan Angere.
+## Install
+
+Python 3.11 or newer is required. The library has no runtime dependencies.
+
+```sh
+python -m pip install .
+kanm-run --help
+```
+
+## Core modules
+
+- `kanm.model`: seeded agent-based simulations with explicit inquiry, communication, and update rules.
+- `kanm.bayes`: Laputa-style belief updates and a finite-grid exact-joint comparator for static source reliabilities.
+- `kanm.dependence`: exact inference in an analyst-specified binary provenance DAG with conditional probability tables.
+- `kanm.model_uncertainty`: posterior and predictive sensitivity across candidate provenance DAGs, with optional Bayesian averaging under explicit model weights.
+- `kanm.testimony`: small testimony-chain and urn-task models.
+- `kanm.reliability`: majority vote, one-coin and two-coin Dawid–Skene MAP-EM, and online comparison methods.
+- `kanm.inquiry` and `kanm.collaborative`: question selection and finite-horizon collaborative planning.
+- `kanm.robust_planning`: maximin and minimax-regret inquiry plans when the provenance graph is uncertain, and the value of learning which graph is true.
+
+For example, explicit provenance distinguishes five independent checks from five reports copied from one study:
 
 ```python
 from kanm.dependence import ProvenanceNetwork, relay, symmetric_primary
 
-net = ProvenanceNetwork()
-net.add(symmetric_primary("study", 0.75))         # one study, never seen directly
-for k in range(5):
-    net.add(relay(f"person{k}", "study", 0.95))    # five people passing it on
+network = ProvenanceNetwork()
+network.add(symmetric_primary("study", 0.75))
+for index in range(5):
+    network.add(relay(f"report-{index}", "study", 0.95))
 
-heard = {f"person{k}": True for k in range(5)}
-net.posterior(0.5, heard)                # 0.75: worth about one study
-net.independence_posterior(0.5, heard)   # 0.992: what you get if you count them separately
+posterior = network.posterior(0.5, {f"report-{index}": True for index in range(5)})
 ```
 
-## Install
+When lineage is disputed, `ProvenanceModelSet` can report the posterior range
+across candidate graphs without assigning them probabilities. Bayesian model
+averaging is a separate option and requires explicit prior model weights; the
+weights are updated after each observed report and can be used directly by the
+collaborative planner.
 
-Python 3.11 or newer. No other dependencies.
+```python
+from kanm.model_uncertainty import ProvenanceModelSet
+
+independent = ProvenanceNetwork()
+independent.add(symmetric_primary("study", 0.75))
+for index in range(5):
+    independent.add(symmetric_primary(f"report-{index}", 0.75))
+observed = {f"report-{index}": True for index in range(5)}
+
+alternatives = ProvenanceModelSet({"copied": network, "independent": independent})
+interval = alternatives.posterior_envelope(0.5, observed)
+
+weighted = ProvenanceModelSet(
+    {"copied": network, "independent": independent},
+    model_weights={"copied": 0.4, "independent": 0.6},
+)
+posterior = weighted.model_averaged_posterior(0.5, observed)
+```
+
+Without defensible weights, an inquiry plan can still be chosen by a stated
+criterion. `robust_collaborative_plan` treats the graph as fixed but unknown
+and returns the maximin or minimax-regret plan, possibly randomized, together
+with a bound showing that no other plan does better. Weights known only within intervals
+are accepted through `lower` and `upper`, and `credal_posterior` gives the
+matching posterior range.
+
+```python
+from kanm.collaborative import CollaborativeAction
+from kanm.robust_planning import robust_collaborative_plan, value_of_provenance_information
+
+for net in (network, independent):
+    net.add(symmetric_primary("audit", 0.8))
+actions = [CollaborativeAction(f"read-{index}", f"report-{index}", "reader", cost=0.02)
+           for index in range(3)]
+actions.append(CollaborativeAction("check", "audit", "auditor", cost=0.08))
+utilities = {"adopt": {True: 1.0, False: -1.0}, "reject": {True: -0.5, False: 0.5}}
+
+graphs = ProvenanceModelSet({"copied": network, "independent": independent})
+plan = robust_collaborative_plan(0.5, graphs, actions, utilities, horizon=3,
+                                 criterion="minimax_regret")
+plan.guarantee                 # worst expected regret 0.0275
+plan.first_step_probabilities  # audit first with probability 9/34, else read a report
+
+weighted = ProvenanceModelSet({"copied": network, "independent": independent},
+                              model_weights={"copied": 0.4, "independent": 0.6})
+value_of_provenance_information(0.5, weighted, actions, utilities, horizon=3).value  # 0.0149
+```
+
+## Assumptions and limits
+
+Exact results are exact only for the supplied model. `ProvenanceNetwork` uses the graph and conditional probabilities provided by the analyst; it does not infer unknown sources, causal history, or speakers' reporting policies. `ProvenanceModelSet` makes a finite, analyst-chosen set of alternatives visible; its envelope is not a guarantee about omitted models, and model-averaged results depend on the supplied prior model weights. Exact enumeration is exponential in the number of unobserved ancestors per network and is capped at 20.
+
+`ExactJointState` models one binary hypothesis with static source reliabilities and independent reliability priors conditional on the hypothesis. Robust plans are chosen once, at the start: their guarantee holds for the plan as committed, and re-solving after some reports can recommend something else. Dawid–Skene methods use their stated one-coin or two-coin assumptions and EM can converge to a local MAP solution. None of these mechanisms by itself establishes human predictive validity or a universal rule for trust.
+
+Public-data loaders fetch data only when called and verify checksums. No third-party datasets or trained model weights are distributed.
+
+## Development
+
+Run the package tests with:
 
 ```sh
-python -m pip install git+https://github.com/DANIELKHAN26/kanm-epistemic-inquiry
+python -m unittest discover -s tests -v
 ```
 
-## What is inside
+The optional `docking/` harness compares KANM's Laputa 1.6 compatibility behavior with a separately obtained historical source archive; that source archive is not included.
 
-- `kanm.dependence`: exact belief for reports with known sources, including people who copy, relay, or partly check for themselves.
-- `kanm.testimony`: chains of informants who hear each other before speaking, as in the classic balls-and-urns experiments.
-- `kanm.model`: network simulations of belief and trust, with Laputa's update rule or an exact one.
-- `kanm.reliability`: learning how reliable each source is from their track record, tested on five public crowdsourcing data sets.
-- `kanm.inquiry` and `kanm.collaborative`: deciding which question to ask next, and who should check what.
-- `docking/`: a harness that compiles the original Laputa 1.6 code and compares it with KANM step by step.
+## Citation and licence
 
-## Run a simulation
-
-Describe a network in a JSON file:
-
-```json
-{
-  "steps": 50,
-  "seed": 7,
-  "n_agents": 10,
-  "agent_defaults": {"prior_belief": 0.5, "inquiry_accuracy": 0.7, "inquiry_chance": 0.4},
-  "network": {"type": "erdos_renyi", "p": 0.3, "seed": 7},
-  "edge_defaults": {"listen_chance": 0.5, "assertion_threshold": 0.75}
-}
-```
-
-Then run it once, or compare Laputa's update with the exact one over many seeds:
-
-```sh
-kanm-run network.json
-kanm-run network.json --replicates 100 --compare update_rule=laputa,exact_joint
-```
-
-The data loaders (`kanm.crowd_data`, `kanm.testimony_data`, `kanm.structure_data`) download public data sets only when asked, check each file against a fixed hash, and never redistribute them.
-
-## Tests
-
-```sh
-python -m unittest discover -s tests
-```
-
-## Cite
-
-Khan, D. (2026). *KANM* (version 0.10.0) [Computer software]. https://github.com/DANIELKHAN26/kanm-epistemic-inquiry
-
-GitHub's "Cite this repository" button gives the same in BibTeX. If you use the Laputa-style updates, please also cite Olsson (2011) and Vallinder & Olsson (2014).
-
-## Licence
-
-GPL-3.0-only. See `LICENSE` and `NOTICE.md`.
-
-Made by Daniel Khan · [danielkhan.org](https://danielkhan.org)
+Citation metadata are in [CITATION.cff](CITATION.cff). KANM is licensed under GPL-3.0-only; see [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for third-party attributions and data handling.

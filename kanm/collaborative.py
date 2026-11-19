@@ -16,6 +16,7 @@ from typing import Mapping, Sequence
 
 from .bayes import _probability
 from .dependence import ProvenanceNetwork
+from .model_uncertainty import ProvenanceModelSet
 
 MAX_COLLABORATIVE_STATES = 2_000_000
 _TIE_TOLERANCE = 1e-12
@@ -88,7 +89,7 @@ class CollaborativePlan:
 
 def optimal_collaborative_plan(
     prior: float,
-    network: ProvenanceNetwork,
+    network: ProvenanceNetwork | ProvenanceModelSet,
     actions: Sequence[CollaborativeAction],
     decision_utilities: Mapping[str, Mapping[bool, float]],
     *,
@@ -107,6 +108,9 @@ def optimal_collaborative_plan(
     and previous reports.
 
     ``inference="joint"`` conditions reports on the complete provenance DAG.
+    A :class:`~kanm.model_uncertainty.ProvenanceModelSet` is also accepted; in
+    that case ``joint`` uses its explicitly weighted Bayesian model average,
+    and the planner updates model probabilities after each observed report.
     ``inference="independent"`` is a diagnostic comparator: it uses each
     report's exact marginal likelihood, then treats acquired reports as
     conditionally independent given truth. The latter can overcount relays.
@@ -114,62 +118,16 @@ def optimal_collaborative_plan(
     not ECED or a scalable active-learning guarantee. The calculation refuses
     more than :data:`MAX_COLLABORATIVE_STATES` distinct states.
     """
-    if not isinstance(network, ProvenanceNetwork):
-        raise TypeError("network must be a ProvenanceNetwork")
-    prior = _probability(prior, "prior")
-    if not isinstance(actions, Sequence) or not actions:
-        raise ValueError("at least one action is required")
-    if any(not isinstance(action, CollaborativeAction) for action in actions):
-        raise TypeError("actions must contain CollaborativeAction objects")
-    if len({action.action_id for action in actions}) != len(actions):
-        raise ValueError("action IDs must be unique")
-    if len({action.evidence_node for action in actions}) != len(actions):
-        raise ValueError("each evidence node may appear in only one action")
-    if isinstance(horizon, bool) or not isinstance(horizon, int) or horizon < 0:
-        raise ValueError("horizon must be an integer >= 0")
-    if (
-        isinstance(cost_weight, bool)
-        or not isinstance(cost_weight, (int, float))
-        or not isfinite(cost_weight)
-        or cost_weight < 0.0
-    ):
-        raise ValueError("cost_weight must be finite and >= 0")
-    if inference not in ("joint", "independent"):
-        raise ValueError("inference must be 'joint' or 'independent'")
-    if not isinstance(decision_utilities, Mapping) or not decision_utilities:
-        raise ValueError("decision_utilities must contain at least one decision")
-    utilities: dict[str, dict[bool, float]] = {}
-    for decision, values in decision_utilities.items():
-        if not isinstance(decision, str) or not decision.strip():
-            raise ValueError("decision names must be nonempty strings")
-        if not isinstance(values, Mapping) or len(values) != 2 or any(
-            type(truth) is not bool for truth in values
-        ) or set(values) != {True, False}:
-            raise ValueError("each decision must define utility for True and False")
-        utilities[decision] = {}
-        for truth in (True, False):
-            utility = values[truth]
-            if (
-                isinstance(utility, bool)
-                or not isinstance(utility, (int, float))
-                or not isfinite(utility)
-            ):
-                raise ValueError("decision utilities must be finite numbers")
-            utilities[decision][truth] = float(utility)
-
-    by_id = {action.action_id: action for action in actions}
-    by_node = {action.evidence_node: action.action_id for action in actions}
-    for action in actions:
-        if action.evidence_node not in network.nodes:
-            raise ValueError(f"unknown evidence node: {action.evidence_node}")
-        unknown = sorted(set(action.requires) - set(by_id))
-        if unknown:
-            raise ValueError(f"unknown prerequisite action IDs: {unknown}")
-    _check_prerequisite_cycles(by_id)
-
-    if initial_observations is None:
-        initial_observations = {}
-    observations = network._check_observations(initial_observations)
+    if not isinstance(network, (ProvenanceNetwork, ProvenanceModelSet)):
+        raise TypeError("network must be a ProvenanceNetwork or ProvenanceModelSet")
+    if isinstance(network, ProvenanceModelSet) and network.model_weights is None:
+        raise ValueError(
+            "collaborative planning over a ProvenanceModelSet requires explicit model_weights"
+        )
+    prior, utilities, by_id, observations = _validated_problem(
+        prior, network, actions, decision_utilities, horizon, cost_weight, initial_observations,
+        inference=inference,
+    )
     # Validate that the starting state has positive probability under the
     # prior before search (also covers endpoint priors and certain CPDs).
     if inference == "joint":
@@ -200,13 +158,9 @@ def optimal_collaborative_plan(
     def predictive(action: CollaborativeAction, state: Mapping[str, bool]) -> dict[bool, float]:
         if inference == "joint":
             return network.predictive_distribution(action.evidence_node, prior, state)
-        p_true_given_h, p_true_given_not_h = network.marginal_likelihoods(
-            action.evidence_node
+        return network.independence_predictive_distribution(
+            action.evidence_node, prior, state
         )
-        belief = network.independence_posterior(prior, state)
-        p_true = belief * p_true_given_h + (1.0 - belief) * p_true_given_not_h
-        p_true = min(1.0, max(0.0, p_true))
-        return {False: 1.0 - p_true, True: p_true}
 
     def eligible(action: CollaborativeAction, state: Mapping[str, bool]) -> bool:
         if action.evidence_node in state:
@@ -266,6 +220,77 @@ def optimal_collaborative_plan(
         evaluated_states=state_count,
         policy=MappingProxyType(policy),
     )
+
+
+def _validated_problem(
+    prior: float,
+    network: ProvenanceNetwork | ProvenanceModelSet,
+    actions: Sequence[CollaborativeAction],
+    decision_utilities: Mapping[str, Mapping[bool, float]],
+    horizon: int,
+    cost_weight: float,
+    initial_observations: Mapping[str, bool] | None,
+    *,
+    inference: str | None = None,
+) -> tuple[float, dict[str, dict[bool, float]], dict[str, CollaborativeAction], dict[str, bool]]:
+    """Check a planning problem; shared by the Bayes and robust planners.
+
+    ``inference`` is checked only when given, at the point where the Bayes
+    planner always checked it, so the first error reported is unchanged.
+    """
+    prior = _probability(prior, "prior")
+    if not isinstance(actions, Sequence) or not actions:
+        raise ValueError("at least one action is required")
+    if any(not isinstance(action, CollaborativeAction) for action in actions):
+        raise TypeError("actions must contain CollaborativeAction objects")
+    if len({action.action_id for action in actions}) != len(actions):
+        raise ValueError("action IDs must be unique")
+    if len({action.evidence_node for action in actions}) != len(actions):
+        raise ValueError("each evidence node may appear in only one action")
+    if isinstance(horizon, bool) or not isinstance(horizon, int) or horizon < 0:
+        raise ValueError("horizon must be an integer >= 0")
+    if (
+        isinstance(cost_weight, bool)
+        or not isinstance(cost_weight, (int, float))
+        or not isfinite(cost_weight)
+        or cost_weight < 0.0
+    ):
+        raise ValueError("cost_weight must be finite and >= 0")
+    if inference is not None and inference not in ("joint", "independent"):
+        raise ValueError("inference must be 'joint' or 'independent'")
+    if not isinstance(decision_utilities, Mapping) or not decision_utilities:
+        raise ValueError("decision_utilities must contain at least one decision")
+    utilities: dict[str, dict[bool, float]] = {}
+    for decision, values in decision_utilities.items():
+        if not isinstance(decision, str) or not decision.strip():
+            raise ValueError("decision names must be nonempty strings")
+        if not isinstance(values, Mapping) or len(values) != 2 or any(
+            type(truth) is not bool for truth in values
+        ) or set(values) != {True, False}:
+            raise ValueError("each decision must define utility for True and False")
+        utilities[decision] = {}
+        for truth in (True, False):
+            utility = values[truth]
+            if (
+                isinstance(utility, bool)
+                or not isinstance(utility, (int, float))
+                or not isfinite(utility)
+            ):
+                raise ValueError("decision utilities must be finite numbers")
+            utilities[decision][truth] = float(utility)
+
+    by_id = {action.action_id: action for action in actions}
+    for action in actions:
+        if action.evidence_node not in network.node_ids:
+            raise ValueError(f"unknown evidence node: {action.evidence_node}")
+        unknown = sorted(set(action.requires) - set(by_id))
+        if unknown:
+            raise ValueError(f"unknown prerequisite action IDs: {unknown}")
+    _check_prerequisite_cycles(by_id)
+    if initial_observations is None:
+        initial_observations = {}
+    observations = network.validate_observations(initial_observations)
+    return prior, utilities, by_id, observations
 
 
 def _check_prerequisite_cycles(actions: Mapping[str, CollaborativeAction]) -> None:

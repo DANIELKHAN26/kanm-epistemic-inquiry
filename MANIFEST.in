@@ -1,0 +1,13 @@
+include README.md
+include LICENSE
+include NOTICE.md
+include CITATION.cff
+recursive-include kanm *.py
+recursive-include tests *.py
+recursive-include docking *.py *.sh *.cpp *.h *.sha256
+include docking/laputa_1_6/README.md
+prune examples
+prune research
+prune huggingface
+exclude CHANGELOG.md
+global-exclude *.py[cod] *.so *.dll *.dylib

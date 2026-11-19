@@ -22,6 +22,13 @@ class EvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate evidence ID"):
             ledger.add(EvidenceItem("parent", "q", "no", "b"))
 
+    def test_read_only_items_view_preserves_append_only_validation(self):
+        ledger = EvidenceLedger()
+        item = EvidenceItem("root", "q", "yes", "source")
+        ledger.add(item)
+        with self.assertRaises(TypeError):
+            ledger.items["bypass"] = item
+
     def test_scope_assessment_distinguishes_match_mismatch_and_missing(self):
         evidence = EvidenceItem(
             "e1", "q", "yes", "lab", scope={"population": "adults", "setting": "clinic"}

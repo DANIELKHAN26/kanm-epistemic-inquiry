@@ -48,6 +48,11 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-empty"):
             CrowdData("x", (("", "w", 1),))
 
+    def test_gold_labels_cannot_be_mutated_after_validation(self):
+        data = CrowdData("x", (("i", "w", 1),), {"i": 1})
+        with self.assertRaises(TypeError):
+            data.gold["i"] = 0
+
     def test_order_must_be_permutation(self):
         data = CrowdData("x", (("a", "w", 1), ("b", "w", 0)))
         with self.assertRaisesRegex(ValueError, "permutation"):

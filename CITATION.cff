@@ -6,10 +6,8 @@ title: "KANM: Question-Directed Collaborative Inquiry"
 authors:
   - family-names: Khan
     given-names: Daniel
-version: 0.10.0
-date-released: 2026-11-18
+version: 0.11.0
 license: GPL-3.0-only
-repository-code: "https://github.com/DANIELKHAN26/kanm-epistemic-inquiry"
 keywords:
   - agent-based modeling
   - Bayesian inference

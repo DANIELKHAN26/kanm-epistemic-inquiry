@@ -197,9 +197,12 @@ class Laputa16Trust:
 def validated_node_values(values: Sequence[float], label: str) -> Laputa16Trust:
     """Build a trust function from user-supplied node values.
 
-    Values are used as given, as in Laputa, but their trapezoid mass must be
-    within :data:`MASS_TOLERANCE` of 1 so that an unnormalised input cannot
-    silently distort the expectation.
+    The input must be nonnegative and its trapezoid mass must be within
+    :data:`MASS_TOLERANCE` of 1. Accepted values are then normalized exactly.
+    This treats small discretization and serialization error as numerical
+    error while ensuring the values used as a probability density really have
+    unit mass. The historical ``default_batch`` preset is kept separate and
+    retains Laputa 1.6's original, slightly unnormalized tabulated values.
     """
     if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
         raise ValueError(f"{label} must be a list of {NODES} numbers")
@@ -207,9 +210,12 @@ def validated_node_values(values: Sequence[float], label: str) -> Laputa16Trust:
         trust = Laputa16Trust(values)
     except ValueError as exc:
         raise ValueError(f"{label}: {exc}") from None
-    if abs(trust.mass - 1.0) > MASS_TOLERANCE:
+    mass = trust.mass
+    if abs(mass - 1.0) > MASS_TOLERANCE:
         raise ValueError(
-            f"{label}: trapezoid mass {trust.mass:.6g} is not within {MASS_TOLERANCE} of 1; "
+            f"{label}: trapezoid mass {mass:.6g} is not within {MASS_TOLERANCE} of 1; "
             "Laputa assumes normalised trust functions"
         )
-    return trust
+    if mass <= 0.0:
+        raise ValueError(f"{label}: trapezoid mass must be positive")
+    return Laputa16Trust(value / mass for value in trust.values)

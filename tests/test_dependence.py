@@ -134,6 +134,13 @@ class DependenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "added first"):
             net.add(relay("r", "missing", 0.9))
 
+    def test_read_only_nodes_view_preserves_dag_validation(self):
+        net = ProvenanceNetwork()
+        node = symmetric_primary("root", 0.8)
+        net.add(node)
+        with self.assertRaises(TypeError):
+            net.nodes["bypass"] = node
+
     def test_exact_inference_warns_before_latent_enumeration_gets_expensive(self):
         net = ProvenanceNetwork()
         net.add(symmetric_primary("n0", 0.8))
@@ -211,6 +218,64 @@ class DependenceNumericsTests(unittest.TestCase):
         self.assertAlmostEqual(report["exact_log_odds_shift"], 60 * math.log(4))
         self.assertAlmostEqual(report["independence_log_odds_shift"], 61 * math.log(4))
         self.assertAlmostEqual(report["overcounting_ratio"], 61 / 60)
+
+    def test_independence_likelihood_ratio_preserves_underflowed_marginals(self):
+        net = ProvenanceNetwork()
+        count = 16
+        rare = 1e-30
+        for index in range(count):
+            node_id = f"r{index}"
+            parents = () if index == 0 else (f"r{index - 1}",)
+            cpd = {}
+            for truth in (True, False):
+                p_true = rare if truth else 2.0 * rare
+                for parent_value in ((None,) if index == 0 else (True, False)):
+                    probability = p_true if parent_value is not False else 0.0
+                    key = (truth, ()) if index == 0 else (truth, (parent_value,))
+                    cpd[key] = probability
+            net.add(ReportNode(node_id, parents, cpd))
+
+        target = {f"r{count - 1}": True}
+        # Both exact marginal likelihoods are below the smallest positive
+        # float, but their ratio is finite and well-defined in log space.
+        self.assertEqual(net.marginal_likelihoods(f"r{count - 1}"), (0.0, 0.0))
+        expected_llr = count * math.log(0.5)
+        self.assertAlmostEqual(net.independence_log_likelihood_ratio(target), expected_llr)
+        self.assertAlmostEqual(
+            net.independence_posterior(0.5, target),
+            1.0 / (1.0 + 2.0**count),
+            places=15,
+        )
+
+    def test_independence_predictive_remains_normalized_with_tiny_likelihood(self):
+        net = ProvenanceNetwork()
+        for index in range(16):
+            node_id = f"r{index}"
+            parents = () if index == 0 else (f"r{index - 1}",)
+            cpd = {}
+            for truth in (True, False):
+                p_true = 1e-30 if truth else 2e-30
+                for parent_value in ((None,) if index == 0 else (True, False)):
+                    key = (truth, ()) if index == 0 else (truth, (parent_value,))
+                    cpd[key] = p_true if parent_value is not False else 0.0
+            net.add(ReportNode(node_id, parents, cpd))
+        prediction = net.independence_predictive_distribution("r15", 0.5, {})
+        self.assertEqual(prediction, {False: 1.0, True: 0.0})
+
+    def test_independence_predictive_matches_marginal_formula(self):
+        net = ProvenanceNetwork()
+        net.add(symmetric_primary("source", 0.8))
+        net.add(relay("relay", "source", 0.9))
+        net.add(primary("audit", sensitivity=0.7, false_positive_rate=0.4))
+        prior = 0.3
+        observations = {"relay": True}
+        # The relay marginal is itself averaged over its primary parent:
+        # P(relay=True | H)=0.8*0.9 + 0.2*0.1 = 0.74 (and 0.26 under not-H).
+        p_h = prior * 0.74 / (prior * 0.74 + (1.0 - prior) * 0.26)
+        expected_true = p_h * 0.7 + (1.0 - p_h) * 0.4
+        prediction = net.independence_predictive_distribution("audit", prior, observations)
+        self.assertAlmostEqual(prediction[True], expected_true, places=14)
+        self.assertAlmostEqual(prediction[False], 1.0 - expected_true, places=14)
 
 
 if __name__ == "__main__":

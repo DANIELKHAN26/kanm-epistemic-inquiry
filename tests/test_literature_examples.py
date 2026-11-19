@@ -5,6 +5,7 @@ import unittest
 
 from kanm.bayes import ExactJointState, TrustDistribution, update_belief
 from kanm.dependence import ProvenanceNetwork, ReportNode, relay, symmetric_primary
+from kanm.model_uncertainty import ProvenanceModelSet
 
 
 class ConnerTrustExamplesTest(unittest.TestCase):
@@ -91,6 +92,23 @@ class YoungDependenceNetworkTest(unittest.TestCase):
         odds = (low / (1 - low)) * (high / (1 - high))
         self.assertAlmostEqual(low / (1 - low), 18.0, delta=1e-12)
         self.assertAlmostEqual(odds / (1 + odds), 306 / 477, delta=1e-12)   # +14.15 points
+
+    def test_the_dependence_prior_is_a_weight_on_two_graphs(self):
+        # DEP is a root that switches the group between a shared-source graph
+        # and an independent one, so the article's network is Bayesian model
+        # averaging over two graphs with weight P(DEP). Disagreement about that
+        # weight then bounds the posteriors it can rationally produce.
+        said = {f"tes{k}": True for k in range(3)}
+        graphs = {"dependent": self.group(1.0), "independent": self.group(0.0)}
+        averaged = ProvenanceModelSet(graphs, model_weights={"dependent": 0.5, "independent": 0.5})
+        self.assertAlmostEqual(averaged.posterior(0.5, said), 12.6 / 13.6, delta=1e-12)
+        span = ProvenanceModelSet(graphs).credal_posterior(
+            0.5, said, lower={"dependent": 0.2, "independent": 0.2},
+            upper={"dependent": 0.8, "independent": 0.8},
+        )
+        self.assertAlmostEqual(span.lower, self.group(0.8).posterior(0.5, said), delta=1e-12)
+        self.assertAlmostEqual(span.upper, self.group(0.2).posterior(0.5, said), delta=1e-12)
+        self.assertAlmostEqual(span.upper, 18 / 19, delta=1e-12)
 
 
 class HahnOrderEffectsTest(unittest.TestCase):

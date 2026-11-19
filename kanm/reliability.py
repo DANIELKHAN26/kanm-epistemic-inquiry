@@ -47,6 +47,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from math import fsum, isfinite, log, sqrt
 import random
+from types import MappingProxyType
 from typing import Mapping, Sequence
 
 from .bayes import ExactJointState, TrustDistribution, expit, log_likelihood_ratio
@@ -96,7 +97,7 @@ class CrowdData:
         if any(type(v) is not int or v not in (0, 1) for v in gold.values()):
             raise ValueError("gold answers must be the integers 0 or 1")
         object.__setattr__(self, "labels", labels)
-        object.__setattr__(self, "gold", gold)
+        object.__setattr__(self, "gold", MappingProxyType(gold))
 
     @property
     def items(self) -> list[str]:
