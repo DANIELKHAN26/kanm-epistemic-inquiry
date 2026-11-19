@@ -29,12 +29,34 @@ python -m pip install git+https://github.com/DANIELKHAN26/kanm-epistemic-inquiry
 
 - `kanm.dependence`: exact belief for reports with known sources, including people who copy, relay, or partly check for themselves.
 - `kanm.testimony`: chains of informants who hear each other before speaking, as in the classic balls-and-urns experiments.
-- `kanm.model`: network simulations of belief and trust, with Laputa's update rule or an exact one. Run them from the command line with `kanm-run examples/minimal_network.json`.
+- `kanm.model`: network simulations of belief and trust, with Laputa's update rule or an exact one.
 - `kanm.reliability`: learning how reliable each source is from their track record, tested on five public crowdsourcing data sets.
 - `kanm.inquiry` and `kanm.collaborative`: deciding which question to ask next, and who should check what.
 - `docking/`: a harness that compiles the original Laputa 1.6 code and compares it with KANM step by step.
 
-The `examples/` folder has short demos and the scripts behind each study. Some studies download public data sets on request; nothing is redistributed, and every file is checked against a fixed hash. The study scripts need NumPy, and some need SciPy (`pip install ".[analysis]"`).
+## Run a simulation
+
+Describe a network in a JSON file:
+
+```json
+{
+  "steps": 50,
+  "seed": 7,
+  "n_agents": 10,
+  "agent_defaults": {"prior_belief": 0.5, "inquiry_accuracy": 0.7, "inquiry_chance": 0.4},
+  "network": {"type": "erdos_renyi", "p": 0.3, "seed": 7},
+  "edge_defaults": {"listen_chance": 0.5, "assertion_threshold": 0.75}
+}
+```
+
+Then run it once, or compare Laputa's update with the exact one over many seeds:
+
+```sh
+kanm-run network.json
+kanm-run network.json --replicates 100 --compare update_rule=laputa,exact_joint
+```
+
+The data loaders (`kanm.crowd_data`, `kanm.testimony_data`, `kanm.structure_data`) download public data sets only when asked, check each file against a fixed hash, and never redistribute them.
 
 ## Tests
 

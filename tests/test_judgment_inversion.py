@@ -6,11 +6,6 @@ import unittest
 from kanm import judgment_inversion as J
 from kanm.structure_data import OWN_EVIDENCE, STRONG_BLUE, WEAK_RED, parse, parse_triads
 
-try:
-    import examples.study_structure_weight as weight_study
-except ImportError:  # NumPy/SciPy are optional analysis dependencies
-    weight_study = None
-
 # Saved inferences of Fränken et al. (2024), github.com/janphilippfranken/spacefish @ a1681e8,
 # analysis/inferred_observations/exp_1_cond_{1,3}_*.txt, room 0: (red, blue) after trials 5 and 10.
 SAVED = {
@@ -133,24 +128,6 @@ class TriadDataTest(unittest.TestCase):
         mixed["p2"]["info"]["condition"] = "independent"
         with self.assertRaises(ValueError):
             parse_triads(json.dumps({"r": mixed}), 2)
-
-
-@unittest.skipIf(weight_study is None, "NumPy and SciPy are needed for the vectorised study code")
-class VectorisedLikelihoodTest(unittest.TestCase):
-    def test_matches_reference_functions(self):
-        records = [([0, 1, None, 0, -1, -1, -2, -2, -2, -1], STRONG_BLUE, WEAK_RED, "C"),
-                   ([0, 1, 0, 0, 0, 0, -1, -1, -1, -1], (0, 0, -1, -1, -1, -1, -2, -2, -2, -2),
-                    (0, 0, 0, 0, 0, 0, 1, 1, 1, 1), "C"),
-                   ([0, 1, 1, 0, 0, -1, -1, -2, -2, -2], STRONG_BLUE, WEAK_RED, "B")]
-        design = weight_study.build_design(records, J.UNIFORM_EVIDENCE, 10.0)
-        self.assertLess(weight_study.check_against_reference(records, design), 1e-12)
-
-    def test_decision_categories(self):
-        cases = {(0.1, 0.6): "partial", (0.3, 1.2): "consistent_with_full", (-0.2, 0.5):
-                 "not_detected_and_below_full", (-0.3, 1.4): "uninformative", (1.1, 1.5): "greater_than_full",
-                 (-0.9, -0.1): "below_zero"}
-        for interval, expected in cases.items():
-            self.assertEqual(weight_study.decision(interval), expected)
 
 
 if __name__ == "__main__":

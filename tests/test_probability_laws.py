@@ -1,12 +1,14 @@
 """Laws that any correct Bayesian implementation must satisfy, checked exactly.
 
-1. Conservation of expected evidence: under the agent's own predictive
-   distribution, the expected posterior equals the prior, E[P(H | E)] = P(H).
-   Credence is a martingale. This is the property Dorst (2023) relies on:
-   predictable polarization needs evidence the agent cannot fully read.
+1. Reflection (the martingale property): under the agent's own predictive
+   distribution, the expected posterior equals the prior, E[P(H | E)] = P(H),
+   for conditioning on evidence from a partition with nonzero probabilities.
+   Dorst (2023) shows that, given the value of evidence, only ambiguous
+   evidence can break it and so allow expectable polarization.
 2. The same holds for the expected reliability of a source after a report.
-3. Data processing: reports that only relay one study cannot carry more
-   evidence than the study itself, however many there are.
+3. Relay bound: when reports only relay one study, P(H | relays) is a weighted
+   average of P(H | study outcome), so it never exceeds the posterior given the
+   most favourable study outcome, however many relays there are.
 """
 
 import itertools
@@ -100,10 +102,10 @@ class ConservationOfExpectedEvidenceTest(unittest.TestCase):
                 self.assertAlmostEqual(expected, 0.3, delta=1e-12)
 
 
-class DataProcessingTest(unittest.TestCase):
+class RelayBoundTest(unittest.TestCase):
     def test_relays_never_carry_more_evidence_than_their_source(self):
-        # H -> study -> relays is a Markov chain, so P(H | relays) is a garbling of
-        # P(H | study): agreeing relays can at most reach the study's own posterior.
+        # H -> study -> relays is a Markov chain, so P(H | relays) averages the
+        # posteriors given each study outcome and cannot exceed the larger one.
         for reliability, fidelity in itertools.product((0.6, 0.75, 0.95), (0.55, 0.8, 0.99)):
             bound = reliability   # P(H | study says H) at prior 1/2
             for n in range(1, 9):

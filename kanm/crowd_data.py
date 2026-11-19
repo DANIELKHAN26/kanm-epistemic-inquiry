@@ -18,7 +18,7 @@ Provenance (each verified on 2026-11-15 by downloading and checksumming):
     in the file and are mapped to 0/1 here (2 -> 1); the file does not say
     which code means "before".
 ``welinder2010_bluebirds``
-    Welinder, Branson, Perona & Belongie (2010), "The Multidimensional Wisdom
+    Welinder, Branson, Belongie & Perona (2010), "The Multidimensional Wisdom
     of Crowds", NeurIPS 23. Files from github.com/welinder/cubam (repository
     licence: Clear BSD, stated for the software). Identical to "d_Duck
     Identification" in Zheng et al. (2017).

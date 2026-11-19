@@ -12,7 +12,7 @@ A re-implementation of the models of Fränken, Valentin, Lucas & Bramley (2024),
 - **An agent that watches others:** its belief at trial t also includes its parents' inferred counts from trial t − 1 (the authors' recursive, structure-sensitive filter, "Level-2").
 - **Ignoring the structure:** treating every agent as independent gives the structure-blind "Level-1" inversion.
 
-**Prior used here:** the saved inferences the authors used for their published predictions were produced with a uniform evidence prior and ``tau = 10``. Those are the defaults (research/15, section 8).
+**Prior used here:** the saved inferences the authors used for their published predictions were produced with a uniform evidence prior and ``tau = 10``. Those are the defaults; ``tests/test_judgment_inversion.py`` checks them against the saved inferences.
 """
 
 from __future__ import annotations

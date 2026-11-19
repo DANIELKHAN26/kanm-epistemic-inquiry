@@ -7,7 +7,7 @@ KANM is a new implementation based on published model equations and descriptions
 The optional docking harness in `docking/laputa_1_6/` is KANM's own code (stubs, a driver and a build script). When you build it, it compiles the unmodified Laputa 1.6 model files from your own copy of the 1.6 archive, verified by checksum. Those files are not distributed with KANM. The harness's `resetSimulation` restates the nine lines of per-run initialisation in the 1.6 `Simulation::reset` (Simulation.cpp, lines 126–134), because that file is not compiled.
 
 **Data.** No third-party data are distributed with KANM. The loaders download files from their original locations on request, verify SHA-256 checksums, and parse them in memory.
-- `kanm.crowd_data`: Snow, O'Connor, Jurafsky & Ng (2008), EMNLP, pp. 254–263; Welinder, Branson, Perona & Belongie (2010), NeurIPS 23; Zheng, Li, Li, Shan & Cheng (2017), PVLDB 10(5), 541–552, doi:10.14778/3055540.3055547.
+- `kanm.crowd_data`: Snow, O'Connor, Jurafsky & Ng (2008), EMNLP, pp. 254–263; Welinder, Branson, Belongie & Perona (2010), NeurIPS 23; Zheng, Li, Li, Shan & Cheng (2017), PVLDB 10(5), 541–552, doi:10.14778/3055540.3055547.
 - `kanm.testimony_data`: Xie & Hayes (2022), *Cognitive Science* 46(5), e13144, doi:10.1111/cogs.13144; data at [osf.io/qng93](https://osf.io/qng93/). The authors' published model predictions are quoted as test values in `tests/test_testimony.py`.
 - `kanm.structure_data`: Fränken, Valentin, Lucas & Bramley (2024), *Cognition* 242, 105633, doi:10.1016/j.cognition.2023.105633; data from [github.com/janphilippfranken/spacefish](https://github.com/janphilippfranken/spacefish) (MIT licence), commit `a1681e8`.
 

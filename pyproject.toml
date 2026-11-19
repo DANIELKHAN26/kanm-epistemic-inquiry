@@ -24,7 +24,7 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-# Only for the research studies and figures; the package itself has no dependencies.
+# Optional, for analysis scripts outside the package; the package itself has no dependencies.
 analysis = ["numpy>=1.24", "scipy>=1.10", "matplotlib>=3.7"]
 
 [project.scripts]

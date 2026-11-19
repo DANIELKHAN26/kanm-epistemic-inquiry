@@ -5,7 +5,7 @@
 **Data:** github.com/janphilippfranken/spacefish, MIT licence, pinned to commit ``a1681e81a84da5934dbffb4da6722cf22eedb133``. :func:`download` fetches the three Experiment 1 files and verifies their SHA-256 checksums; :func:`load` parses them. Participants are keyed anonymously.
 
 **Design:**
-- **Evidence:** every participant (agent A) catches one fish, on trial 2, and sees the same scripted judgments from agents B and C. Judgments are stored in the frame where A's fish is red and positive means red; this was checked against the authors' processed files (research/15, section 8).
+- **Evidence:** every participant (agent A) catches one fish, on trial 2, and sees the same scripted judgments from agents B and C. Judgments are stored in the frame where A's fish is red and positive means red; this was checked against the authors' processed files for every participant.
 - **Conditions:** they differ only in the stated structure, ``"c_sees_b"``, ``"b_sees_c"`` or ``"none"``.
 
 **File labels:** the condition is read from each participant's ``structureHint``, together with the file it comes from.

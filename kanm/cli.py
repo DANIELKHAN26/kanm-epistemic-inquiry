@@ -2,7 +2,7 @@
 
 A configuration either lists ``agents`` and ``edges`` explicitly or generates
 them with ``n_agents``/``agent_defaults`` and ``network``/``edge_defaults``.
-See ``examples/`` for both forms.
+The README shows the generated form.
 """
 
 from __future__ import annotations
