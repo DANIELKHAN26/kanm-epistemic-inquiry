@@ -39,6 +39,18 @@ class ExactConditionalTest(unittest.TestCase):
         study.curveball(state, Random(1))
         self.assertEqual(margins(state[0]), before)
 
+    def test_curveball_single_worker_batch_is_a_noop(self):
+        state = [study.Batch(2, [{0}], [])]
+        study.curveball(state, Random(1))
+        self.assertEqual(state[0].rows, [{0}])
+
+    def test_test_rejects_designs_without_testable_pairs_or_draws(self):
+        seed = np.random.SeedSequence(1)
+        with self.assertRaisesRegex(ValueError, "at least one pair"):
+            study.test([], 0, seed, samples=1)
+        with self.assertRaisesRegex(ValueError, "samples must be at least 1"):
+            study.test([], 1, seed, samples=0)
+
     def test_curveball_samples_uniformly_from_the_fixed_margin_set(self):
         # 3 workers x 4 items, worker totals (2, 2, 1), item totals (2, 1, 1, 1)
         rows = [{0, 1}, {0, 2}, {3}]
@@ -73,18 +85,35 @@ class ExactConditionalTest(unittest.TestCase):
         expected = [product[a, b] for a in range(6) for b in range(a + 1, 6)]
         np.testing.assert_array_equal(study.co_errors(state, tested), expected)
 
-    def test_p_values_are_exactly_uniform_under_the_null(self):
+    def test_whole_test_is_valid_under_the_null(self):
+        # End to end: simulate null data, run the full test, check the p-values.
+        # With 19 draws p lies on {1/20, ..., 1}; it is uniform without ties and
+        # stochastically larger with them, so P(p <= 0.05) <= 0.05.
         workers = np.tile(np.arange(6), (40, 1))
         p_values = []
-        root = np.random.SeedSequence(11)
-        for child in root.spawn(300):
+        for child in np.random.SeedSequence(11).spawn(300):
             data_seed, test_seed = child.spawn(2)
             design = study.ClassDesign(workers, np.zeros((40, 6), dtype=np.int8))
             errors = study.simulate_rasch(design, np.random.default_rng(data_seed))
             state, tested = study.batches([study.ClassDesign(workers, errors)])
             p_values.append(study.test(state, tested, test_seed, samples=19)["p_value"])
-        # p is uniform on {1/20, ..., 20/20}: mean 0.525, SD 0.289, SE of the mean 0.017
-        self.assertAlmostEqual(float(np.mean(p_values)), 0.525, delta=0.06)
+        p_values = np.asarray(p_values)
+        # binomial SE of a 5% rate over 300 runs is 0.0126; allow three SEs
+        self.assertLessEqual(float(np.mean(p_values <= 0.05)), 0.05 + 3 * 0.0126)
+        # mean 0.525 if uniform on the grid; SE 0.017; larger means are conservative
+        self.assertGreaterEqual(float(np.mean(p_values)), 0.525 - 3 * 0.017)
+
+    def test_inclusive_rank_p_values_are_conservative_when_statistics_tie(self):
+        values = np.array([2.0, 2.0, 1.0, 0.0])
+        p_values = [study._upper_rank_pvalue(np.r_[value, np.delete(values, k)])
+                    for k, value in enumerate(values)]
+        # The explicit tie case keeps the whole exchangeable tie block in the tail.
+        self.assertEqual(study._upper_rank_pvalue(values), 0.5)
+        for alpha in (0.25, 0.5, 0.75, 1.0):
+            rejection_rate = np.mean(np.asarray(p_values) <= alpha)
+            self.assertLessEqual(rejection_rate, alpha)
+        # A constant statistic yields p=1, never a false rejection.
+        self.assertEqual(study._upper_rank_pvalue(np.ones(20)), 1.0)
 
     def test_detects_strong_copying(self):
         rng = np.random.default_rng(2)
@@ -95,11 +124,12 @@ class ExactConditionalTest(unittest.TestCase):
         state, tested = study.batches([study.ClassDesign(workers, errors)])
         result = study.test(state, tested, np.random.SeedSequence(4), samples=999)
         self.assertLessEqual(result["p_value"], 0.01)
-        self.assertGreaterEqual(result["bh_discoveries_positive"], 1)
+        self.assertAlmostEqual(result["reference_mean_D"], result["pairs_varying_under_null"])
 
     def test_multiple_testing_helpers(self):
-        found = study.benjamini_hochberg(np.array([0.001, 0.02, 0.04, 0.5]), 0.05)
-        self.assertEqual(found.tolist(), [True, True, False, False])
+        found = study.benjamini_yekutieli(np.array([0.001, 0.02, 0.04, 0.5]), 0.05)
+        self.assertEqual(found.tolist(), [True, False, False, False])
+        self.assertEqual(study.benjamini_yekutieli(np.array([]), 0.05).tolist(), [])
         adjusted = study.holm({"a": 0.01, "b": 0.04, "c": 0.03})
         self.assertAlmostEqual(adjusted["a"], 0.03)
         self.assertAlmostEqual(adjusted["c"], 0.06)

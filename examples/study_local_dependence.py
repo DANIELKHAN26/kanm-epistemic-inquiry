@@ -1,4 +1,4 @@
-"""Exact conditional test of local dependence between crowd workers (research/18).
+"""Conditional Rasch lack-of-fit test for crowd-worker errors (research/18).
 
 Usage::
 
@@ -10,8 +10,10 @@ logistic(theta[w, c, b] + delta[i]), independently. Under this Rasch model the
 worker and item error totals are sufficient, so given both margins every error
 matrix is equally likely, whatever the parameters. Error matrices are drawn
 from that uniform distribution by curveball trades (Strona et al. 2014;
-Carstens 2015), and the Besag-Clifford (1989) parallel scheme makes the Monte
-Carlo p-value exact however well the chain mixes. No parameter is estimated.
+Carstens 2015), and the Besag-Clifford (1989) parallel scheme gives a
+finite-sample-valid conditional Monte Carlo test without a mixing assumption.
+Inclusive tie handling makes p-values conservative when statistics tie. No
+parameter is estimated.
 
 The test asks whether shared errors are concentrated in particular worker
 pairs beyond that model. Needs NumPy (``pip install .[analysis]``). Worker
@@ -132,6 +134,8 @@ def curveball(state: list[Batch], rng: Random) -> None:
     for batch in state:
         rows = batch.rows
         n = len(rows)
+        if n < 2:
+            continue
         for _ in range(TRADES_PER_WORKER * n):
             r, s = rng.sample(range(n), 2)
             only_r, only_s = rows[r] - rows[s], rows[s] - rows[r]
@@ -174,37 +178,53 @@ def null_draws(state: list[Batch], tested: int, samples: int, seed: np.random.Se
     return out
 
 
+def _upper_rank_pvalue(statistics: np.ndarray) -> float:
+    """Inclusive upper-tail rank p-value; ties are retained conservatively."""
+    values = np.asarray(statistics, dtype=float)
+    if values.ndim != 1 or values.size == 0:
+        raise ValueError("statistics must be a non-empty one-dimensional array")
+    return float(np.count_nonzero(values >= values[0]) / values.size)
+
+
 # --------------------------------------------------------------------------- test
 def test(state: list[Batch], tested: int, seed: np.random.SeedSequence, samples: int = SAMPLES,
          pool: ProcessPoolExecutor | None = None) -> dict:
-    """Exact global dispersion test and pair-level Monte Carlo p-values for one data set.
+    """Conditional global dispersion test and pair-level Monte Carlo p-values.
 
     Pairs are standardised by the mean and SD over the observed matrix and all null
-    draws together: a symmetric function of the exchangeable set, so the rank of the
-    observed statistic gives an exact p-value.
+    draws together: a symmetric function of the exchangeable set. Inclusive ranks
+    give valid p-values and are conservative when the statistic has ties.
     """
+    if tested < 1:
+        raise ValueError("at least one pair must vary under the conditional null")
+    if samples < 1:
+        raise ValueError("samples must be at least 1")
     observed = co_errors(state, tested)
     draws = np.vstack([observed, null_draws(state, tested, samples, seed, pool)])
     mean, sd = draws.mean(axis=0), draws.std(axis=0)
     varies = sd > 0
+    if not varies.any():
+        raise ValueError("no tested pair varies under the conditional null")
     z = (draws[:, varies] - mean[varies]) / sd[varies]
     d = (z ** 2).sum(axis=1)
     pair_p = ((draws[1:, varies] >= observed[varies]).sum(axis=0) + 1.0) / (samples + 1.0)
-    discovered = benjamini_hochberg(pair_p, ALPHA)
+    discovered = benjamini_yekutieli(pair_p, ALPHA)
     null_sorted = np.sort(z[1:], axis=1)
+    reference_mean = float(d.mean())
     return {
         "statistic_D": float(d[0]),
         "null_mean_D": float(d[1:].mean()),
-        "dispersion_ratio_R": float(d[0] / d[1:].mean()),
-        "null_R_2_5_97_5": [float(np.quantile(d[1:], 0.025) / d[1:].mean()),
-                            float(np.quantile(d[1:], 0.975) / d[1:].mean())],
-        "p_value": float((d >= d[0]).sum() / (samples + 1)),
+        "reference_mean_D": reference_mean,
+        "dispersion_ratio_R": float(d[0] / reference_mean),
+        "null_R_2_5_97_5": [float(np.quantile(d[1:] / reference_mean, 0.025)),
+                            float(np.quantile(d[1:] / reference_mean, 0.975))],
+        "p_value": _upper_rank_pvalue(d),
         "samples": samples,
         "tested_pairs": int(tested),
         "pairs_varying_under_null": int(varies.sum()),
         "pairs_with_excess_shared_errors": int((z[0] > 0).sum()),
-        "bh_discoveries_positive": int(discovered.sum()),
-        "share_of_D_in_discoveries": float((z[0][discovered] ** 2).sum() / d[0]) if d[0] > 0 else 0.0,
+        "by_discoveries_positive": int(discovered.sum()),
+        "share_of_D_in_by_discoveries": float((z[0][discovered] ** 2).sum() / d[0]) if d[0] > 0 else 0.0,
         "z_sorted": [round(float(v), 4) for v in np.sort(z[0])],
         "null_z_sorted_mean": [round(float(v), 4) for v in null_sorted.mean(axis=0)],
         "null_z_sorted_2_5": [round(float(v), 4) for v in np.quantile(null_sorted, 0.025, axis=0)],
@@ -212,10 +232,14 @@ def test(state: list[Batch], tested: int, seed: np.random.SeedSequence, samples:
     }
 
 
-def benjamini_hochberg(p_values: np.ndarray, level: float) -> np.ndarray:
+def benjamini_yekutieli(p_values: np.ndarray, level: float) -> np.ndarray:
+    """Control false discovery rate under arbitrary dependence among tests."""
     order = np.argsort(p_values, kind="stable")
     m = len(p_values)
-    passed = p_values[order] <= level * np.arange(1, m + 1) / m
+    if m == 0:
+        return np.zeros(0, dtype=bool)
+    harmonic = np.sum(1.0 / np.arange(1, m + 1))
+    passed = p_values[order] <= level * np.arange(1, m + 1) / (m * harmonic)
     out = np.zeros(m, dtype=bool)
     if passed.any():
         out[order[: np.nonzero(passed)[0].max() + 1]] = True
@@ -318,7 +342,7 @@ def run(data_dir: str, seed: int = SEED) -> dict:
     adjusted = holm({k: v["p_value"] for k, v in results.items()})
     for name, value in adjusted.items():
         results[name]["p_holm"] = value
-        results[name]["reject_independence"] = value <= ALPHA
+        results[name]["reject_conditional_rasch"] = value <= ALPHA
     return {"design": {"min_shared_items": MIN_SHARED, "trades_per_worker": TRADES_PER_WORKER,
                        "samples": SAMPLES, "alpha": ALPHA, "seed": seed,
                        "plan": "research/18, sections 1-8"},
